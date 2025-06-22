@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack
+    container_name: localstack
+    ports:
+      - "4566:4566"            # Main API endpoint
+      - "4510-4559:4510-4559"   # Service-specific ports
+    environment:
+      - SERVICES=lambda,sqs,dynamodb,apigateway,cloudformation,ses   # Enable only needed services
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - LAMBDA_DOCKER_NETWORK=my-localstack-net
+      - DEBUG=1                  # Optional: verbose logging
+      - LAMBDA_REMOTE_DOCKER=false
+      - PERSISTENCE=1            # Enable data persistence
+      - DATA_DIR=/var/lib/localstack/data
+    volumes:
+      - ./localstack-data:/var/lib/localstack/data  # Persist data to host
+      - /var/run/docker.sock:/var/run/docker.sock   # Required for Lambda execution
+    networks:
+      - my-localstack-net
+
+networks:
+  my-localstack-net:
+    driver: bridge

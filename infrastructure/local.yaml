@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Event Registration System - Full LocalStack Compatible
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: EventRegSys
+  Environment:
+    Type: String
+    Default: local
+    AllowedValues: [local, prod]
+  CognitoUserPoolArn:
+    Type: String
+    Default: 'arn:aws:cognito-idp:us-east-1:000000000000:userpool/local-pool'
+  CognitoUserPoolId:
+    Type: String
+    Default: 'local-pool'
+  SESVerifiedEmailSender:
+    Type: String
+    Default: 'no-reply@localstack.cloud'
+
+Conditions:
+  IsLocalEnvironment: !Equals [!Ref Environment, 'local']
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 128
+    Runtime: python3.9
+    Tracing: Active
+    Environment:
+      Variables:
+        AWS_DEFAULT_REGION: !Ref 'AWS::Region'
+        ENVIRONMENT: !Ref Environment
+        # LocalStack endpoint (will be empty in prod)
+        LOCALSTACK_ENDPOINT: !If 
+          - IsLocalEnvironment
+          - 'http://host.docker.internal:4566'
+          - !Ref 'AWS::NoValue'
+
+Resources:
+  # --- API Gateway ---
+  EventRegistrationApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers: 
+          CognitoAuthorizer:
+            UserPoolArn: !Ref CognitoUserPoolArn
+            Identity:
+              Header: Authorization
+            JwtConfiguration:
+              issuer: !If 
+                - IsLocalEnvironment
+                - "http://localhost:4566"
+                - !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}"
+              audience:
+                - !If 
+                  - IsLocalEnvironment
+                  - !Ref LocalCognitoUserPoolClient
+                  - "your-production-client-id"  # REPLACE WITH YOUR ACTUAL CLIENT ID
+      CorsConfiguration:
+        AllowOrigins: "'*'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowMethods: "'*'"
+        MaxAge: 600
+
+  # --- DynamoDB Tables ---
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ProjectName}-Events-${Environment}
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+        - AttributeName: organizerId
+          AttributeType: S
+        - AttributeName: eventDate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      GlobalSecondaryIndexes:
+        - IndexName: OrganizerIdIndex
+          KeySchema:
+            - AttributeName: organizerId
+              KeyType: HASH
+            - AttributeName: eventDate
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+  RegistrationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ProjectName}-Registrations-${Environment}
+      AttributeDefinitions:
+        - AttributeName: registrationId
+          AttributeType: S
+        - AttributeName: eventId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: registrationId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      GlobalSecondaryIndexes:
+        - IndexName: EventIdIndex
+          KeySchema:
+            - AttributeName: eventId
+              KeyType: HASH
+            - AttributeName: registrationId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: registrationId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+  # --- SQS Queue ---
+  EmailNotificationsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-EmailQueue-${Environment}
+      VisibilityTimeout: 300
+
+  # --- Lambda Functions ---
+  EventManagerLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-EventManager-${Environment}
+      CodeUri: ../events_manager_lambda/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          # Service endpoints
+          DYNAMODB_ENDPOINT_OVERRIDE: !If 
+            - IsLocalEnvironment
+            - 'http://host.docker.internal:4566'
+            - !Ref 'AWS::NoValue'
+          COGNITO_ENDPOINT_OVERRIDE: !If 
+            - IsLocalEnvironment
+            - 'http://host.docker.internal:4566'
+            - !Ref 'AWS::NoValue'
+          # Cognito config
+          USER_POOL_ID: !Ref CognitoUserPoolId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPool
+              - cognito-idp:GetUser
+            Resource: !Ref CognitoUserPoolArn
+      Events:
+        CreateEvent:
+          Type: HttpApi
+          Properties:
+            Path: /events
+            Method: POST
+            ApiId: !Ref EventRegistrationApi
+        GetEvents:
+          Type: HttpApi
+          Properties:
+            Path: /events
+            Method: GET
+            ApiId: !Ref EventRegistrationApi
+        GetEventDetails:
+          Type: HttpApi
+          Properties:
+            Path: /events/{eventId}
+            Method: GET
+            ApiId: !Ref EventRegistrationApi
+        UpdateEvent:
+          Type: HttpApi
+          Properties:
+            Path: /events/{eventId}
+            Method: PUT
+            ApiId: !Ref EventRegistrationApi
+        DeleteEvent:
+          Type: HttpApi
+          Properties:
+            Path: /events/{eventId}
+            Method: DELETE
+            ApiId: !Ref EventRegistrationApi
+  #
+  # RegistrationManagerLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName: !Sub ${ProjectName}-RegistrationManager-${Environment}
+  #     CodeUri: registration-manager-lambda/
+  #     Handler: app.lambda_handler
+  #     Environment:
+  #       Variables:
+  #         EVENTS_TABLE_NAME: !Ref EventsTable
+  #         REGISTRATIONS_TABLE_NAME: !Ref RegistrationsTable
+  #         EMAIL_QUEUE_URL: !Ref EmailNotificationsQueue
+  #         # Service endpoints
+  #         DYNAMODB_ENDPOINT_OVERRIDE: !If 
+  #           - IsLocalEnvironment
+  #           - 'http://host.docker.internal:4566'
+  #           - !Ref 'AWS::NoValue'
+  #         SQS_ENDPOINT_OVERRIDE: !If 
+  #           - IsLocalEnvironment
+  #           - 'http://host.docker.internal:4566'
+  #           - !Ref 'AWS::NoValue'
+  #         # Cognito config
+  #         USER_POOL_ID: !Ref CognitoUserPoolId
+  #     Policies:
+  #       - DynamoDBCrudPolicy:
+  #           TableName: !Ref RegistrationsTable
+  #       - DynamoDBReadPolicy:
+  #           TableName: !Ref EventsTable
+  #       - SQSSendMessagePolicy:
+  #           QueueName: !GetAtt EmailNotificationsQueue.QueueName
+  #       - Statement:
+  #           Effect: Allow
+  #           Action:
+  #             - cognito-idp:DescribeUserPool
+  #             - cognito-idp:GetUser
+  #           Resource: !Ref CognitoUserPoolArn
+  #     Events:
+  #       RegisterForEvent:
+  #         Type: HttpApi
+  #         Properties:
+  #           Path: /events/{eventId}/register
+  #           Method: POST
+  #           ApiId: !Ref EventRegistrationApi
+  #
+  # AttendeeViewerLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName: !Sub ${ProjectName}-AttendeeViewer-${Environment}
+  #     CodeUri: attendee-viewer-lambda/
+  #     Handler: app.lambda_handler
+  #     Environment:
+  #       Variables:
+  #         EVENTS_TABLE_NAME: !Ref EventsTable
+  #         REGISTRATIONS_TABLE_NAME: !Ref RegistrationsTable
+  #         # Service endpoints
+  #         DYNAMODB_ENDPOINT_OVERRIDE: !If 
+  #           - IsLocalEnvironment
+  #           - 'http://host.docker.internal:4566'
+  #           - !Ref 'AWS::NoValue'
+  #         # Cognito config
+  #         USER_POOL_ID: !Ref CognitoUserPoolId
+  #     Policies:
+  #       - DynamoDBReadPolicy:
+  #           TableName: !Ref RegistrationsTable
+  #       - DynamoDBReadPolicy:
+  #           TableName: !Ref EventsTable
+  #       - Statement:
+  #           Effect: Allow
+  #           Action:
+  #             - cognito-idp:DescribeUserPool
+  #             - cognito-idp:GetUser
+  #           Resource: !Ref CognitoUserPoolArn
+  #     Events:
+  #       GetAttendees:
+  #         Type: HttpApi
+  #         Properties:
+  #           Path: /events/{eventId}/attendees
+  #           Method: GET
+  #           ApiId: !Ref EventRegistrationApi
+  #
+  # EmailSenderLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName: !Sub ${ProjectName}-EmailSender-${Environment}
+  #     CodeUri: email-sender-lambda/
+  #     Handler: app.lambda_handler
+  #     Environment:
+  #       Variables:
+  #         SES_SENDER_EMAIL: !Ref SESVerifiedEmailSender
+  #         # Service endpoints
+  #         SES_ENDPOINT_OVERRIDE: !If 
+  #           - IsLocalEnvironment
+  #           - 'http://host.docker.internal:4566'
+  #           - !Ref 'AWS::NoValue'
+  #         SQS_ENDPOINT_OVERRIDE: !If 
+  #           - IsLocalEnvironment
+  #           - 'http://host.docker.internal:4566'
+  #           - !Ref 'AWS::NoValue'
+  #     Policies:
+  #       - SESCrudPolicy:
+  #           IdentityName: !Ref SESVerifiedEmailSender
+  #     Events:
+  #       SQSTrigger:
+  #         Type: SQS
+  #         Properties:
+  #           Queue: !GetAtt EmailNotificationsQueue.Arn
+  #           BatchSize: 10
+  #
+  # --- Local Cognito Resources ---
+  LocalCognitoUserPool:
+    Condition: IsLocalEnvironment
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-UserPool-${Environment}
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+
+  LocalCognitoUserPoolClient:
+    Condition: IsLocalEnvironment
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${ProjectName}-Client-${Environment}
+      UserPoolId: !Ref LocalCognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+Outputs:
+  EventRegistrationApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !If
+      - IsLocalEnvironment
+      - !Sub "http://${EventRegistrationApi}.execute-api.localhost.localstack.cloud:4566/${Environment}/"
+      - !Sub "https://${EventRegistrationApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
+  
+  CognitoUserPoolId:
+    Description: "Cognito User Pool ID"
+    Value: !If
+      - IsLocalEnvironment
+      - !Ref LocalCognitoUserPool
+      - !Ref CognitoUserPoolId
+  
+  CognitoClientId:
+    Description: "Cognito Client ID"
+    Value: !If
+      - IsLocalEnvironment
+      - !Ref LocalCognitoUserPoolClient
+      - "Set-in-production"
