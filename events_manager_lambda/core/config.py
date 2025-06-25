@@ -2,7 +2,6 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    IS_OFFLINE: bool
     EVENTS_TABLE_NAME: str
     ORGANIZER_GROUP: str = "Organizers"
     LOG_LEVEL: str = "INFO"

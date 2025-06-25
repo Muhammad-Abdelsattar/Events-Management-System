@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from services import event_manager
 from models.events import EventCreate, EventUpdate, EventInDB, User, EventListResponse
-from core.dependencies import get_current_organizer, get_user_from_request
+from core.dependencies import get_current_organizer, get_current_user
 
 router = APIRouter()
 

@@ -10,7 +10,14 @@ __pycache__/
 # C extensions
 *.so
 
+# Zip files
+*.zip
+
+
+.terraform*
+
 # Distribution / packaging
+.terraform/
 .Python
 build/
 develop-eggs/
