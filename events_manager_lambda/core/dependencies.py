@@ -1,3 +1,4 @@
+import json
 from fastapi import Request, HTTPException, status, Depends
 from typing import Optional
 
@@ -71,7 +72,7 @@ def requires_group(group: str):
 
 
 def get_current_user(claims: dict = Depends(requires_auth)):
-    return User.parse_object(claims)
+    return User.parse_obj(claims)
 
 
 def get_current_organizer(user: User = Depends(get_current_user)):
@@ -79,6 +80,7 @@ def get_current_organizer(user: User = Depends(get_current_user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required."
         )
+    print(user)
     if settings.ORGANIZER_GROUP not in user.groups:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

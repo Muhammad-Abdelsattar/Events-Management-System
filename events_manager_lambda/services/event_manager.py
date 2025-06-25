@@ -50,14 +50,16 @@ def create_event(event_data: EventCreate, user_id: str) -> Dict[str, Any]:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     item = event_data.model_dump()
+    date = str(item["eventDate"])
     item.update(
         {
             "eventId": str(uuid4()),
             "organizerId": user_id,
             "registeredAttendeesCount": 0,
             "status": EventStatus.ACTIVE.value,
-            "createdAt": now_iso,
-            "updatedAt": now_iso,
+            "createdAt": str(now_iso),
+            "updatedAt": str(now_iso),
+            "eventDate": date
         }
     )
     table.put_item(Item=item)
@@ -140,10 +142,12 @@ def update_event(
         A dictionary of the event item with its new attributes.
     """
     update_dict = event_data.model_dump(exclude_unset=True)
+    if (update_dict.get("eventDate")):
+        update_dict["eventDate"] = str(update_dict["eventDate"])
     if not update_dict:
         raise InvalidUpdate("No fields provided for update.")
 
-    update_dict["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    update_dict["updatedAt"] = str(datetime.now(timezone.utc).isoformat())
 
     update_expression = "SET " + ", ".join(f"#{k} = :{k}" for k in update_dict)
     expression_attribute_names = {f"#{k}": k for k in update_dict}
@@ -192,3 +196,4 @@ def delete_event(event_id: str, user_id: str):
                 "Deletion failed: Event not found, you are not the owner, or it has registered attendees."
             )
         raise
+
