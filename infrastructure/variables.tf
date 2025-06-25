@@ -4,8 +4,14 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "cognito_user_pool_id" {
-  description = "The ID of the existing Cognito User Pool."
+
+variable "user_pool_id" {
+  description = "The NAME of the existing Cognito User Pool."
+  type        = string
+}
+
+variable "cognito_client_id" {
+  description = "The client id of Cognito User Pool."
   type        = string
 }
 

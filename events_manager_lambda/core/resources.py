@@ -10,4 +10,4 @@ def get_boto3_resource(service_name):
         config["endpoint_url"] = endpoint_url
         config["region_name"] = "us-east-1"
 
-    return boto3.client(service_name, **config)
+    return boto3.resource(service_name)

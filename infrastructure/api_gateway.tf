@@ -1,6 +1,5 @@
 data "aws_cognito_user_pool" "existing_pool" {
-  # The user must provide this value in a .tfvars file
-  name = var.cognito_user_pool_id
+  user_pool_id= var.user_pool_id
 }
 
 resource "aws_apigatewayv2_api" "http_api" {
@@ -15,8 +14,8 @@ resource "aws_apigatewayv2_authorizer" "cognito_auth" {
   name             = "cognito-authorizer"
 
   jwt_configuration {
-    audience = [data.aws_cognito_user_pool.existing_pool.id]
-    issuer   = "https://${data.aws_cognito_user_pool.existing_pool.endpoint}"
+    audience = [var.cognito_client_id]
+    issuer   = "https://cognito-idp.${data.aws_cognito_user_pool.existing_pool.region}.amazonaws.com/${data.aws_cognito_user_pool.existing_pool.id}"
   }
 }
 

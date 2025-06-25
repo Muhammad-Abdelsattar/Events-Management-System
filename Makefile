@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 # Directories
 TF_DIR := infrastructure
-LAMBDA_SRC_DIR := lambda/events_function
+LAMBDA_SRC_DIR := events_manager_lambda
 BUILD_DIR := build
 
 # Terraform command with the -chdir flag to run it in the correct directory
@@ -40,7 +40,7 @@ deps: clean ## Build the Lambda package in the 'build/' directory.
 	@# 1. Create the build directory
 	@mkdir -p $(BUILD_DIR)
 	@# 2. Copy the Lambda source code into the build directory
-	@cp $(LAMBDA_SRC_DIR)/*.py $(BUILD_DIR)/
+	@cp -r $(LAMBDA_SRC_DIR)/* $(BUILD_DIR)/
 	@# 3. Install Python dependencies directly into the build directory
 	@pip install --quiet --requirement "$(LAMBDA_SRC_DIR)/requirements.txt" --target "$(BUILD_DIR)"
 	@echo "✅ Lambda package is ready in '$(BUILD_DIR)'."
