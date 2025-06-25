@@ -16,6 +16,7 @@ __pycache__/
 
 .terraform*
 *.tfvars
+*.tfstate
 
 # Distribution / packaging
 .terraform/
