@@ -1,7 +1,3 @@
-# Makefile for managing the project's AWS infrastructure and Lambda dependencies.
-# All commands are run from the project root.
-
-# Use a more specific shell.
 SHELL := /bin/bash
 
 # ====================================================================================
